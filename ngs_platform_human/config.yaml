@@ -1,0 +1,29 @@
+# ── NGS Platform Human — Configuration ────────────────────────────────────────
+# Konfigurasi untuk pipeline analisis sekunder NGS Human GRCh38 chr22
+
+# ── Referensi Genom ────────────────────────────────────────────────────────────
+ref_genome: "/mnt/c/Users/Mahasiswa/Fastt/ref_genome/chr22.fa"
+
+# ── Direktori ─────────────────────────────────────────────────────────────────
+input_dir:  "uploads"
+output_dir: "results"
+
+# ── Path Tools (menggunakan env snakemake_human) ───────────────────────────────
+tools:
+  fastqc:     "/mnt/c/Users/Mahasiswa/Fastt/FastQC/fastqc"
+  trimmomatic: "/home/mahasiswa/miniconda3/envs/snakemake_human/bin/trimmomatic"
+  bwa:         "/home/mahasiswa/miniconda3/envs/snakemake_human/bin/bwa"
+  samtools:    "/usr/bin/samtools"
+  bcftools:    "/usr/bin/bcftools"
+
+# ── Parameter Pipeline ─────────────────────────────────────────────────────────
+trimmomatic:
+  options: "SLIDINGWINDOW:4:20 MINLEN:25 LEADING:3 TRAILING:3"
+
+bcftools:
+  ploidy:     "GRCh38"    # Diploid human GRCh38
+  min_qual:   20
+  min_depth:  5
+
+# ── Snakemake ─────────────────────────────────────────────────────────────────
+cores: 4

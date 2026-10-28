@@ -1,0 +1,37 @@
+# Output pipeline — jangan di-push
+Demo/results/
+Demo/data/
+ngs_platform/results/
+ngs_platform/uploads/
+ngs_platform/work/
+ngs_platform/.nextflow/
+ngs_platform/.nextflow.log
+ngs_platform/.nextflow.log.*
+ngs_platform_human/results/
+ngs_platform_human/uploads/
+ngs_platform_human/.snakemake/
+ngs_gatk_platform/
+
+# Referensi genome — terlalu besar
+ref_genome/
+
+# Data FASTQ — terlalu besar
+datas/
+
+# FastQC binary
+FastQC/
+
+# Zip/archive
+*.zip
+*.tar.gz
+*.gz
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# OS
+.DS_Store
+Thumbs.db

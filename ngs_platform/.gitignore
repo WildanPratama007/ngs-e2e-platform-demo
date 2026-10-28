@@ -1,0 +1,19 @@
+# Output pipeline
+results/
+uploads/
+
+# Nextflow
+work/
+.nextflow/
+.nextflow.log
+.nextflow.log.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# OS
+.DS_Store
+Thumbs.db

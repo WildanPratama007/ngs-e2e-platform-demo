@@ -1,0 +1,16 @@
+# Output pipeline
+results/
+uploads/
+
+# Snakemake
+.snakemake/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# OS
+.DS_Store
+Thumbs.db

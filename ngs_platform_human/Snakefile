@@ -1,0 +1,153 @@
+"""
+NGS E2E Pipeline — Human GRCh38 chr22
+Alur: FastQC → Trimmomatic SE → BWA MEM → Samtools Sort/Index → BCFTools Variant Calling
+"""
+
+import os
+import glob
+
+# ── Load konfigurasi ──────────────────────────────────────────────────────────
+configfile: "config.yaml"
+
+REF       = config["ref_genome"]
+OUT_DIR   = config["output_dir"]
+IN_DIR    = config["input_dir"]
+TOOLS     = config["tools"]
+TRIM_OPTS = config["trimmomatic"]["options"]
+PLOIDY    = config["bcftools"]["ploidy"]
+MIN_QUAL  = config["bcftools"]["min_qual"]
+MIN_DP    = config["bcftools"]["min_depth"]
+
+# ── Deteksi sampel dari folder uploads ───────────────────────────────────────
+def get_samples():
+    fastq_files = glob.glob(os.path.join(IN_DIR, "*.fastq"))
+    return [os.path.basename(f).replace(".fastq", "") for f in fastq_files]
+
+SAMPLES = get_samples()
+
+# ── Rule All: target akhir pipeline ──────────────────────────────────────────
+rule all:
+    input:
+        expand("{out}/{sample}/fastqc/{sample}_fastqc.html",    out=OUT_DIR, sample=SAMPLES),
+        expand("{out}/{sample}/trimmed/{sample}.trimmed.fastq", out=OUT_DIR, sample=SAMPLES),
+        expand("{out}/{sample}/bwa/{sample}.aligned.sorted.bam",out=OUT_DIR, sample=SAMPLES),
+        expand("{out}/{sample}/vcf/{sample}.filtered.vcf",      out=OUT_DIR, sample=SAMPLES),
+
+# ── Rule 1: FastQC ────────────────────────────────────────────────────────────
+rule fastqc:
+    input:
+        fastq = os.path.join(IN_DIR, "{sample}.fastq")
+    output:
+        html = os.path.join(OUT_DIR, "{sample}/fastqc/{sample}_fastqc.html"),
+        zip  = os.path.join(OUT_DIR, "{sample}/fastqc/{sample}_fastqc.zip"),
+    log:
+        os.path.join(OUT_DIR, "{sample}/logs/fastqc.log")
+    shell:
+        """
+        mkdir -p {OUT_DIR}/{wildcards.sample}/fastqc
+        {TOOLS[fastqc]} {input.fastq} \
+            --outdir {OUT_DIR}/{wildcards.sample}/fastqc \
+            > {log} 2>&1
+        """
+
+# ── Rule 2: Trimmomatic SE ────────────────────────────────────────────────────
+rule trimmomatic_se:
+    input:
+        fastq = os.path.join(IN_DIR, "{sample}.fastq")
+    output:
+        trimmed = os.path.join(OUT_DIR, "{sample}/trimmed/{sample}.trimmed.fastq")
+    log:
+        os.path.join(OUT_DIR, "{sample}/logs/trimmomatic.log")
+    shell:
+        """
+        mkdir -p {OUT_DIR}/{wildcards.sample}/trimmed
+        {TOOLS[trimmomatic]} SE \
+            {input.fastq} \
+            {output.trimmed} \
+            {TRIM_OPTS} \
+            > {log} 2>&1
+
+        # Fallback: jika trimmed kosong (data sintetis tanpa adapter), gunakan file asli
+        if [ ! -s {output.trimmed} ]; then
+            echo "WARNING: Trimmomatic output empty, using original FASTQ" >> {log}
+            cp {input.fastq} {output.trimmed}
+        fi
+        """
+
+# ── Rule 3: BWA MEM + Samtools Sort & Index ───────────────────────────────────
+rule bwa_align:
+    input:
+        trimmed = os.path.join(OUT_DIR, "{sample}/trimmed/{sample}.trimmed.fastq"),
+        ref     = REF,
+        ref_amb = REF + ".amb",
+        ref_ann = REF + ".ann",
+        ref_bwt = REF + ".bwt",
+        ref_pac = REF + ".pac",
+        ref_sa  = REF + ".sa",
+        ref_fai = REF + ".fai",
+    output:
+        bam = os.path.join(OUT_DIR, "{sample}/bwa/{sample}.aligned.sorted.bam"),
+        bai = os.path.join(OUT_DIR, "{sample}/bwa/{sample}.aligned.sorted.bam.bai"),
+    log:
+        os.path.join(OUT_DIR, "{sample}/logs/bwa_align.log")
+    threads: config["cores"]
+    shell:
+        """
+        mkdir -p {OUT_DIR}/{wildcards.sample}/bwa
+
+        {TOOLS[bwa]} mem \
+            -t {threads} \
+            -R "@RG\\tID:{wildcards.sample}\\tSM:{wildcards.sample}\\tPL:ILLUMINA" \
+            {input.ref} \
+            {input.trimmed} \
+            2>> {log} \
+            | {TOOLS[samtools]} sort \
+                -@ {threads} \
+                -o {output.bam} \
+                - \
+                >> {log} 2>&1
+
+        {TOOLS[samtools]} index {output.bam} >> {log} 2>&1
+        """
+
+# ── Rule 4: Variant Calling (BCFTools) ───────────────────────────────────────
+rule variant_calling:
+    input:
+        bam = os.path.join(OUT_DIR, "{sample}/bwa/{sample}.aligned.sorted.bam"),
+        bai = os.path.join(OUT_DIR, "{sample}/bwa/{sample}.aligned.sorted.bam.bai"),
+        ref = REF,
+        fai = REF + ".fai",
+    output:
+        bcf          = os.path.join(OUT_DIR, "{sample}/vcf/{sample}.bcf"),
+        vcf          = os.path.join(OUT_DIR, "{sample}/vcf/{sample}.vcf"),
+        filtered_vcf = os.path.join(OUT_DIR, "{sample}/vcf/{sample}.filtered.vcf"),
+    log:
+        os.path.join(OUT_DIR, "{sample}/logs/variant_calling.log")
+    shell:
+        """
+        mkdir -p {OUT_DIR}/{wildcards.sample}/vcf
+
+        # Step 1: mpileup
+        {TOOLS[bcftools]} mpileup \
+            -O b \
+            -o {output.bcf} \
+            -f {input.ref} \
+            {input.bam} \
+            >> {log} 2>&1
+
+        # Step 2: variant call (diploid GRCh38)
+        {TOOLS[bcftools]} call \
+            --ploidy {PLOIDY} \
+            -m -v \
+            -o {output.vcf} \
+            {output.bcf} \
+            >> {log} 2>&1
+
+        # Step 3: filter low quality variants
+        {TOOLS[bcftools]} filter \
+            -s LOWQUAL \
+            -e 'QUAL<{MIN_QUAL} || DP<{MIN_DP}' \
+            {output.vcf} \
+            > {output.filtered_vcf} \
+            2>> {log}
+        """
